@@ -1,0 +1,91 @@
+trigger:
+  tags:
+    include:
+    - v*.*
+
+variables:
+- group: customertest2-vg-evrycpe
+- group: shared-github-ssh-key
+
+stages:
+- stage: 'TerraformPlan'
+  displayName: 'Terraform Plan'
+  jobs:
+  - job: Provision
+    displayName: 'Provision azure'
+    pool:
+      vmImage: 'ubuntu-16.04'
+    variables:
+      cust_shortname: sz
+    steps:
+    - task: TerraformInstaller@0
+      inputs:
+        terraformVersion: '0.12.20'
+    - task: InstallSSHKey@0
+      inputs:
+        knownHostsEntry: $(knownHostsEntry)
+        sshPublicKey: $(sshPublicKey)
+        sshKeySecureFile: 'id_rsa'
+    - script: |
+        # Exit when any command returns a failure status.
+        set -e
+        # Write backend.tfvars
+        echo 'resource_group_name = "$(cust_shortname)-rg-foundation"' | tee backend.tfvars
+        echo 'storage_account_name = "$(cust_shortname)safoundation"' | tee -a backend.tfvars
+        echo 'container_name = "$(cust_shortname)foundation"' | tee -a backend.tfvars
+        echo 'key = "$(cust_shortname)-foundation.tfstate"' | tee -a backend.tfvars
+
+        echo "backend.tfvars: " && cat backend.tfvars
+        # Initialize Terraform
+        terraform init -input=false -backend-config="backend.tfvars"
+
+        # Run terraform plan
+        terraform plan
+      name: 'RunTerraform'
+      displayName: 'Terraform Plan'
+      env:
+        ARM_CLIENT_SECRET: $(sz-client-secret)
+        ARM_ACCESS_KEY: $(sz-access-key)
+
+- stage: 'TerraformApply'
+  displayName: 'Terraform Apply'
+  jobs:
+    - deployment: DeployDev
+      pool:
+        vmImage: 'ubuntu-16.04'
+      variables:
+        cust_shortname: sz
+      environment: 'customertest2-sprint0-infra'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - checkout: self
+            - task: TerraformInstaller@0
+              inputs:
+                terraformVersion: '0.12.20'
+            - task: InstallSSHKey@0
+              inputs:
+                knownHostsEntry: $(knownHostsEntry)
+                sshPublicKey: $(sshPublicKey)
+                sshKeySecureFile: 'id_rsa'
+            - script: |
+                # Exit when any command returns a failure status.
+                set -e
+                # Write backend.tfvars
+                echo 'resource_group_name = "$(cust_shortname)-rg-foundation"' | tee backend.tfvars
+                echo 'storage_account_name = "$(cust_shortname)safoundation"' | tee -a backend.tfvars
+                echo 'container_name = "$(cust_shortname)foundation"' | tee -a backend.tfvars
+                echo 'key = "$(cust_shortname)-foundation.tfstate"' | tee -a backend.tfvars
+                  
+                # Initialize Terraform
+                terraform init -input=false -backend-config="backend.tfvars"
+                
+                # Apply the Terraform plan.
+                terraform apply -input=false -auto-approve
+                # terraform plan
+              name: 'RunTerraform'
+              displayName: 'Terraform Apply'
+              env:
+                ARM_CLIENT_SECRET: $(sz-client-secret)
+                ARM_ACCESS_KEY: $(sz-access-key)
